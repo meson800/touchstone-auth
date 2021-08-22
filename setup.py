@@ -5,7 +5,7 @@ with open('README.md', 'r', encoding='utf-8') as fh:
 
 setuptools.setup(
     name='touchstone-auth',
-    version='0.1.0',
+    version='0.2.0',
     author='Christopher Johnstone',
     author_email='meson800@gmail.com',
     description='Access Touchstone SSO sites without a web browser.',

@@ -23,6 +23,8 @@ pip install touchstone-auth
 
 Alternatively, you can get built wheels from the [Releases tab on Github](https://github.com/meson800/touchstone-auth/releases).
 
+N.B. if installing manually, `requests_pkcs12` must be version v1.10 (`pip install` handles this automatically).
+
 ## Quickstart
 The class `TouchstoneSession` is simply a `requests.Session` that performs the Touchstone
 authentication flow before returning a working session to you, the authenticated user.

@@ -73,6 +73,8 @@ class TouchstoneSession:
         initial_response = self._session.get(self._base_url)
         # Check to see the final URL to see if we have to do something
         if not initial_response.url.startswith(r'https://idp.mit.edu/idp'):
+            # Attempt loading a bearer token
+            self.load_bearer_token(initial_response)
             self.vlog('Logged in successfully to {} without redirecting through Touchstone'.format(
                 base_url))
             return
@@ -100,6 +102,15 @@ class TouchstoneSession:
             touchstone_response = self.perform_touchstone(match.group(1))
             self.vlog('Performing SSO login post-Duo')
             self.perform_sso(touchstone_response)
+
+    def load_bearer_token(self, response: requests.Response) -> None:
+        """
+        Attempts to load a Bearer token from the final successful redirect.
+        """
+        match = re.search(r".*access_token=([^&]*)&id_token=[^&]*&token_type=Bearer", response.history[0].headers['Location'])
+        if match is not None:
+            self._session.headers.update({'authorization': 'Bearer {}'.format(match.group(1))})
+            self.vlog('Bearer token loaded!')
 
     def perform_touchstone(self, conversation):
         """
@@ -248,6 +259,7 @@ class TouchstoneSession:
             raise TouchstoneError('SSO redirect unsuccessful')
 
         self.vlog('SSO redirect successful!')
+        self.load_bearer_token(r)
 
     def vlog(self, string: str) -> None:
         """

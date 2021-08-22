@@ -9,12 +9,12 @@ import json
 import pathlib
 import pickle
 import re
-from typing import Union
+from typing import Literal, Union
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup  # type: ignore
 import requests
 import requests.utils
-from requests_pkcs12 import Pkcs12Adapter
+from requests_pkcs12 import Pkcs12Adapter  # type: ignore
 
 class TouchstoneError(RuntimeError):
     """Represents all returnable Touchstone Errors"""
@@ -36,7 +36,7 @@ class TouchstoneSession:
         pkcs12_pass:str,
         cookiejar_filename:Union[str,pathlib.Path],
         should_block:bool=True,
-        verbose:bool=False):
+        verbose:bool=False) -> None:
         """
         Creates a new Touchstone session.
 
@@ -51,7 +51,7 @@ class TouchstoneSession:
         verbose: If True, extra information during log-in is printed to stdout
         """
 
-        self._session = requests.Session()
+        self._session: requests.Session = requests.Session()
         self._base_url = base_url
         self._pkcs12 = {'filename': pkcs12_filename, 'password': pkcs12_pass}
         self._cookiejar_filename = cookiejar_filename
@@ -75,6 +75,10 @@ class TouchstoneSession:
             self.vlog('Logged in successfully to {} without redirecting through Touchstone'.format(
                 base_url))
             return
+
+        if initial_response.request.url is None:
+            raise ValueError("initial_response.request.url is None")
+        req_url: str = initial_response.request.url
 
         # Check which IDP page we got redirected to
         match = re.match(
@@ -224,7 +228,7 @@ class TouchstoneSession:
                 'sig_response': f"{duo_auth_info['cookie']}:{duo_app}"
             })
 
-    def perform_sso(self, request):
+    def perform_sso(self, request) -> None:
         """
         Given a Request object, attempts to perform Touchstone SSO redirect by
         extracting form fields and POSTing to the right location.
@@ -243,18 +247,18 @@ class TouchstoneSession:
 
         self.vlog('SSO redirect successful!')
 
-    def vlog(self, string: str):
+    def vlog(self, string: str) -> None:
         """
         Logs a string to stdout if verbose is True
         """
         if self._verbose:
             print(string)
 
-    def __enter__(self):
+    def __enter__(self) -> requests.Session:
         """Returns the internal session when called as a context manager"""
         return self._session
 
-    def close(self):
+    def close(self) -> None:
         """Closes the session while saving the session cookies."""
         # Save cookiejar
         with open(self._cookiejar_filename, 'wb') as cookies:
@@ -262,7 +266,7 @@ class TouchstoneSession:
         # and close the internal session
         self._session.close()
 
-    def __exit__(self, ex_type, value, traceback):
+    def __exit__(self, ex_type, value, traceback) -> Literal[False]:
         self.close()
         return False
 

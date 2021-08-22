@@ -15,6 +15,14 @@ Enter `touchstone-auth`, a Python package powered mostly by the [requests](https
 package! This lets user authenticate themselves programmatically. Cookies are cached,
 meaning that re-authentication is only needed once cookies expire.
 
+## Install
+This package is on Pip, so you can just:
+```
+pip install touchstone-auth
+```
+
+Alternatively, you can get built wheels from the [Releases tab on Github](https://github.com/meson800/touchstone-auth/releases).
+
 ## Quickstart
 The class `TouchstoneSession` is simply a `requests.Session` that performs the Touchstone
 authentication flow before returning a working session to you, the authenticated user.
@@ -31,8 +39,7 @@ The example here loads credentials from a json file called `credentials.json`:
 Then, in your Python file, you can do the following:
 ```
 import json
-
-from touchstone-auth import TouchstoneSession
+from touchstone_auth import TouchstoneSession
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)
@@ -41,7 +48,7 @@ with TouchstoneSession(
     base_url='https://atlas.mit.edu',
     pkcs12_filename=credentials['certfile'],
     pkcs12_pass=credentials['password'],
-    cookiejar='cookies.pickle') as s:
+    cookiejar_filename='cookies.pickle') as s:
 
     response = s.get('https://atlas.mit.edu/atlas/Main.action')
 ```
@@ -54,7 +61,38 @@ If this blocking behavior is undesired, you can set the argument `should_block=F
 in the `TouchstoneSession` constructor. If a blocking 2FA push is required, the error
 `WouldBlockError` will instead be raised.
 
-## Examples
+Finally, there is a `verbose` argument; setting `verbose=True` will output extra
+information about how processing is proceeding.
+
+## Complete Examples
+
+### Get your latest paystub from ADP:
+```
+import json
+from touchstone_auth import TouchstoneSession
+
+with open('credentials.json') as cred_file:
+    credentials = json.load(cred_file)
+
+with TouchstoneSession(
+    base_url='https://myadp.mit.edu',
+    pkcs12_filename=credentials['certfile'],
+    pkcs12_pass=credentials['password'],
+    cookiejar_filename='cookies.pickle') as s:
+
+    response = s.get('https://my.adp.com/myadp_prefix/v1_0/O/A/payStatements?adjustments=yes&numberoflastpaydates=160')
+    response_json = json.loads(response.text)
+    latest = response_json['payStatements'][0]
+    print('Latest paystub ({}): ${} net, ${} gross'.format(
+        latest['payDate'],
+        latest['netPayAmount']['amountValue'],
+        latest['grossPayAmount']['amountValue']))
+```
+which returns
+`Latest paystub (2021-08-13): $XXXX.XX net, $YYYY.YY gross` when run.
+
+### Check your Covidpass building access status:
+
 
 
 ## Developer install

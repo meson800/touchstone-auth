@@ -36,7 +36,8 @@ class TouchstoneSession:
         pkcs12_pass:str,
         cookiejar_filename:Union[str,pathlib.Path],
         should_block:bool=True,
-        verbose:bool=False):
+        verbose:bool=False,
+        wipe_domains=None):
         """
         Creates a new Touchstone session.
 
@@ -49,6 +50,7 @@ class TouchstoneSession:
         should_block: If False, if a Duo 2FA push is required, we instead raise a
             WouldBlockError. Does not error if cookies are recent enough to avoid 2FA.
         verbose: If True, extra information during log-in is printed to stdout
+        wipe_domains: If not None, wipes cookies for that domain before continuing.
         """
 
         self._session = requests.Session()
@@ -67,6 +69,13 @@ class TouchstoneSession:
                 self._session.cookies.update(pickle.load(cookies))
         except FileNotFoundError:
             pass
+        
+        if wipe_domains is not None:
+            for domain in wipe_domains:
+                try:
+                    self._session.cookies.clear(domain=domain)
+                except KeyError:
+                    pass
 
         # Attempt to get the base URL
         initial_response = self._session.get(self._base_url)
@@ -82,7 +91,8 @@ class TouchstoneSession:
             initial_response.request.url)
         if match is None:
             # Check if we need to do the SSO login now
-            if initial_response.url.startswith(r'https://idp.mit.edu/idp/profile/SAML2/Redirect/SSO'):
+            if (initial_response.url.startswith(r'https://idp.mit.edu/idp/profile/SAML2/Redirect/SSO') or
+                initial_response.url.startswith(r'https://idp.mit.edu/idp/profile/SAML2/Unsolicited/SSO')):
                 self.vlog('Touchstone cookies still up to date; performing SSO redirect.')
                 self.perform_sso(initial_response)
             else:
@@ -238,7 +248,7 @@ class TouchstoneSession:
             'RelayState': touchstone_form.find('input', {'name': 'RelayState'})['value'],
             'SAMLResponse': touchstone_form.find('input', {'name': 'SAMLResponse'})['value']
         })
-        if not r.url.startswith(self._base_url):
+        if r.url.startswith('https://idp.mit.edu'):
             raise TouchstoneError('SSO redirect unsuccessful')
 
         self.vlog('SSO redirect successful!')
@@ -267,10 +277,10 @@ class TouchstoneSession:
         return False
 
 if __name__ == '__main__':
-    with open('config.json', encoding='utf-8') as configfile:
+    with open('credentials.json', encoding='utf-8') as configfile:
         config = json.load(configfile)
 
     with TouchstoneSession('https://atlas.mit.edu',
-            config['cert'], config['certpass'], 'cookiejar.pickle',
+            config['certfile'], config['password'], 'cookiejar.pickle',
             verbose=True) as s:
         s.get('https://atlas.mit.edu')

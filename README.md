@@ -32,7 +32,7 @@ Then, in your Python file, you can do the following:
 ```
 import json
 
-from touchstone-auth import TouchstoneSession
+from touchstone_auth import TouchstoneSession
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)

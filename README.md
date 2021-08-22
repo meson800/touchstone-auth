@@ -92,6 +92,27 @@ which returns
 `Latest paystub (2021-08-13): $XXXX.XX net, $YYYY.YY gross` when run.
 
 ### Check your Covidpass building access status:
+```
+import json
+from touchstone_auth import TouchstoneSession
+
+with open('credentials.json') as cred_file:
+    credentials = json.load(cred_file)
+
+with TouchstoneSession(
+    base_url=r'https://atlas-auth.mit.edu/oauth2/authorize?identity_provider=Touchstone&redirect_uri=https://covidpass.mit.edu&response_type=TOKEN&client_id=2ao42ccnajj7jpqd7h059n7eoc&scope=covid19/impersonate covid19/user digital-id/search digital-id/user openid profile',
+    pkcs12_filename=credentials['certfile'],
+    pkcs12_pass=credentials['password'],
+    cookiejar_filename='cookies.pickle') as s:
+
+    response = json.loads(s.get('https://api.mit.edu/pass-v1/pass/access_status').text)
+    print('Current Covidpass status: {}'.format(response['status']))
+```
+This returns `Current Covidpass status: access_granted` if you are in fact up to date on Covidpass.
+
+For the various "new Atlas" OAUTH2 applications, you need to find the relevant authorization URL to put as the base URL.
+
+How did I find the proper URL for Covidpass? By looking in your browser's Developer Tools, you can locate the last GET request prior to redirect to `idp.mit.edu`, then remove the extraneous `state` parameter.
 
 
 

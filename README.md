@@ -15,6 +15,18 @@ Enter `touchstone-auth`, a Python package powered mostly by the [requests](https
 package! This lets user authenticate themselves programmatically. Cookies are cached,
 meaning that re-authentication is only needed once cookies expire.
 
+Note: `requests_pkcs12` must be v1.10 in order to avoid the following error:
+
+```
+  File "/usr/local/lib/python3.9/dist-packages/requests_pkcs12.py", line 95, in __init__
+    self.ssl_context = create_pyopenssl_sslcontext(pkcs12_data, pkcs12_password_bytes, ssl_protocol)
+  File "/usr/local/lib/python3.9/dist-packages/requests_pkcs12.py", line 45, in create_pyopenssl_sslcontext
+    ssl_context._ctx.use_certificate(cert)
+  File "/usr/lib/python3/dist-packages/OpenSSL/SSL.py", line 861, in use_certificate
+    raise TypeError("cert must be an X509 instance")
+TypeError: cert must be an X509 instance
+```
+
 ## Quickstart
 The class `TouchstoneSession` is simply a `requests.Session` that performs the Touchstone
 authentication flow before returning a working session to you, the authenticated user.

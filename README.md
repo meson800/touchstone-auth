@@ -56,7 +56,7 @@ with TouchstoneSession(
 ```
 
 When you call this the first time, your Python script will hang on the 2FA step until
-the Duo push is accepted. Subsequent requests should not block until the 30-day
+the second-factor (by default, Duo push) is accepted. Subsequent requests should not block until the 30-day
 "remember me" period is exceeded.
 
 If this blocking behavior is undesired, you can set the argument `should_block=False`
@@ -116,6 +116,30 @@ For the various "new Atlas" OAUTH2 applications, you need to find the relevant a
 
 How did I find the proper URL for Covidpass? By looking in your browser's Developer Tools, you can locate the last GET request prior to redirect to `idp.mit.edu`, then remove the extraneous `state` parameter.
 
+### Selecting two-factor method
+With version 0.3.0, you can also select between phone-call and Duo Push two factor
+authentication. `touchstone-auth` defaults to Duo Push if you do not select one.
+
+To switch between the two, pass an additional `twofactor_auth` argument. For example,
+to use the phone-call two factor method in the above example, additionally import
+the TwofactorType enum and pass it to the session constructor:
+```
+import json
+from touchstone_auth import TouchstoneSession, TwofactorType
+
+with open('credentials.json') as cred_file:
+    credentials = json.load(cred_file)
+
+with TouchstoneSession(
+    base_url=r'https://atlas-auth.mit.edu/oauth2/authorize?identity_provider=Touchstone&redirect_uri=https://covidpass.mit.edu&response_type=TOKEN&client_id=2ao42ccnajj7jpqd7h059n7eoc&scope=covid19/impersonate covid19/user digital-id/search digital-id/user openid profile',
+    pkcs12_filename=credentials['certfile'],
+    pkcs12_pass=credentials['password'],
+    cookiejar_filename='cookies.pickle',
+    twofactor_type=TwofactorType.PHONE_CALL) as s:
+
+    response = json.loads(s.get('https://api.mit.edu/pass-v1/pass/access_status').text)
+    print('Current Covidpass status: {}'.format(response['status']))
+```
 
 
 ## Developer install
@@ -133,6 +157,18 @@ $ pip install -e .
 ```
 After this 'local install', you can use and import `touchstone-auth` freely without
 having to re-install after each update.
+
+## Changelog
+See the [CHANGELOG](CHANGELOG.md) for detailed changes.
+```
+## [0.3.0] - 2022-01-15
+### Added
+- Added the ability to use phone-call second factor.
+- Added additional constructor argument to select between
+  available second factor options.
+- Added typing-extensions to dependencies to properly support
+  Python 3.6 and Python 3.7
+```
 
 ## License
 This is licensed by the MIT license. Use freely!

@@ -5,7 +5,7 @@ with open('README.md', 'r', encoding='utf-8') as fh:
 
 setuptools.setup(
     name='touchstone-auth',
-    version='0.2.0',
+    version='0.3.0',
     author='Christopher Johnstone',
     author_email='meson800@gmail.com',
     description='Access Touchstone SSO sites without a web browser.',
@@ -28,6 +28,7 @@ setuptools.setup(
     install_requires=[
         'beautifulsoup4',
         'requests',
-        'requests-pkcs12==1.10'
+        'requests-pkcs12==1.10',
+        'typing-extensions'
     ]
 )

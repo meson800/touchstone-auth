@@ -5,11 +5,17 @@ to Touchstone services by a user. No authentication flow is blocked
 or bypassed; this simply allows programatic access to Duo 2FA
 and Touchstone auth outside of a web browser.
 """
+import enum
 import json
 import pathlib
 import pickle
 import re
-from typing import Literal, Union
+from typing import Union
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
+
 
 from bs4 import BeautifulSoup  # type: ignore
 import requests
@@ -21,6 +27,10 @@ class TouchstoneError(RuntimeError):
 
 class WouldBlockError(TouchstoneError):
     """Called when a 2FA blocking push is required in non-blocking mode"""
+
+class TwofactorType(enum.Enum):
+    DUO_PUSH = enum.auto()
+    PHONE_CALL = enum.auto()
 
 class TouchstoneSession:
     """
@@ -36,6 +46,7 @@ class TouchstoneSession:
         pkcs12_pass:str,
         cookiejar_filename:Union[str,pathlib.Path],
         should_block:bool=True,
+        twofactor_type:TwofactorType=TwofactorType.DUO_PUSH,
         verbose:bool=False) -> None:
         """
         Creates a new Touchstone session.
@@ -48,6 +59,9 @@ class TouchstoneSession:
         cookiejar_filename: The location to persist cookies at.
         should_block: If False, if a Duo 2FA push is required, we instead raise a
             WouldBlockError. Does not error if cookies are recent enough to avoid 2FA.
+        twofactor_type: The desired second factor to use for Duo authentication.
+            Only Duo Push (TwofactorType.DUO_PUSH) and phone call (TwofactorType.PHONE_CALL)
+            are currently supported.
         verbose: If True, extra information during log-in is printed to stdout
         wipe_domains: If not None, wipes cookies for that domain before continuing.
         """
@@ -57,6 +71,7 @@ class TouchstoneSession:
         self._pkcs12 = {'filename': pkcs12_filename, 'password': pkcs12_pass}
         self._cookiejar_filename = cookiejar_filename
         self._blocking = should_block
+        self._twofactor_type = twofactor_type
         self._verbose = verbose
         self._session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36'
@@ -171,8 +186,8 @@ class TouchstoneSession:
         if len(auth_request.history) > 0:
             # A redirect happened, do the full auth flow if we have time to block
             if not self._blocking:
-                raise WouldBlockError('Duo push required, but blocking is not allowed')
-            self.vlog('Duo push required: requested Duo auth page')
+                raise WouldBlockError('Second factor auth required, but blocking is not allowed')
+            self.vlog('Second factor auth required: requested Duo auth page')
 
             prompt_url = auth_request.request.url
             prompt_sid = re.match(r".*\/frame\/prompt\?sid=(.*)", prompt_url).group(1)
@@ -184,38 +199,78 @@ class TouchstoneSession:
             }
 
             # POST to send the push
+            factor = {
+                TwofactorType.DUO_PUSH: 'Duo+Push',
+                TwofactorType.PHONE_CALL: 'Phone+Call'
+            }[self._twofactor_type]
             r = self._session.post(f"https://{duo_json['host']}/frame/prompt",
                     # Push data through as raw bytes; this is the correct URL encoding
                     # (don't let requests mess with it by sending as a dict)
                     data=bytes(
-                        f"sid={prompt_sid}&device=phone1&factor=Duo+Push&cookies_allowed=true&dampen_choice=true&out_of_date=&days_out_of_date=&days_to_block=None",
+                        f"sid={prompt_sid}&device=phone1&factor={factor}&cookies_allowed=true&dampen_choice=true&out_of_date=&days_out_of_date=&days_to_block=None",
                         'utf-8'),
                     headers=extra_prompt_headers)
 
-            self.vlog('Requested Duo push to phone')
+            self.vlog(f'Requested second factor authentication ({factor})')
 
             prompt_response = json.loads(r.text)
             if prompt_response['stat'] != 'OK':
-                raise TouchstoneError("Unable to send prompt (push to phone 1)")
+                raise TouchstoneError("Unable to send two-factor request")
 
             # Do a first request (this returns the info 'Pushed a login request to your device')
             r = self._session.post(f"https://{duo_json['host']}/frame/status",
                 data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
                 headers=extra_prompt_headers)
-            if json.loads(r.text)['response']['status_code'] != 'pushed':
-                raise TouchstoneError("Push-to-phone failed")
+            expected_return_status = {
+                TwofactorType.DUO_PUSH: 'pushed',
+                TwofactorType.PHONE_CALL: 'calling'
+            }[self._twofactor_type]
+            if json.loads(r.text)['response']['status_code'] != expected_return_status:
+                raise TouchstoneError(f"Second-factor auth (self._twofactor_type) failed")
 
-            self.vlog('Successfully pushed Duo request. Blocking until response...')
 
             # Block until the user does something with the request
-            r = self._session.post(f"https://{duo_json['host']}/frame/status",
-                data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
-                headers=extra_prompt_headers)
-            post_prompt_response = json.loads(r.text)
-            if post_prompt_response['stat'] != 'OK':
-                raise TouchstoneError("User declined prompt or prompt timed out")
+            if self._twofactor_type == TwofactorType.DUO_PUSH:
+                self.vlog('Successfully pushed Duo push request. Blocking until response...')
+                r = self._session.post(f"https://{duo_json['host']}/frame/status",
+                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+                    headers=extra_prompt_headers)
+                post_prompt_response = json.loads(r.text)
+                self.vlog(post_prompt_response)
+                if post_prompt_response['stat'] != 'OK':
+                    raise TouchstoneError("User declined prompt or prompt timed out")
 
-            self.vlog('Duo push accepted!')
+                self.vlog('Second factor auth successful!')
+            elif self._twofactor_type == TwofactorType.PHONE_CALL:
+                self.vlog('Successfully pushed phone call request...')
+                r = self._session.post(f"https://{duo_json['host']}/frame/status",
+                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+                    headers=extra_prompt_headers)
+                post_request_response = json.loads(r.text)
+                if (post_request_response['stat'] != 'OK' or 
+                    post_request_response['response']['status_code'] != 'calling'):
+                    raise TouchstoneError("Unable to call registered phone number.")
+                self.vlog(post_request_response['response']['status'])
+                # After the dialing response, we expect the answered response.
+                r = self._session.post(f"https://{duo_json['host']}/frame/status",
+                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+                    headers=extra_prompt_headers)
+                post_request_response = json.loads(r.text)
+                if (post_request_response['stat'] != 'OK' or 
+                    post_request_response['response']['status_code'] != 'answered'):
+                    raise TouchstoneError("Twofactor call declined.")
+                self.vlog("Two-factor call answered. Waiting for user input...")
+                # Check for successful response
+                r = self._session.post(f"https://{duo_json['host']}/frame/status",
+                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+                    headers=extra_prompt_headers)
+                post_prompt_response = json.loads(r.text)
+                if (post_prompt_response['stat'] != 'OK' or 
+                    post_prompt_response['response']['status_code'] != 'allow'):
+                    raise TouchstoneError("Two-factor call failed.")
+                self.vlog('Second factor auth successful!')
+            else:
+                raise TouchstoneError('Unknown two-factor flow')
 
             # Get the AUTH token
             r = self._session.post(f"https://{duo_json['host']}{post_prompt_response['response']['result_url']}",
@@ -290,5 +345,6 @@ if __name__ == '__main__':
 
     with TouchstoneSession('https://atlas.mit.edu',
             config['certfile'], config['password'], 'cookiejar.pickle',
+            twofactor_type=TwofactorType.PHONE_CALL,
             verbose=True) as s:
         s.get('https://atlas.mit.edu')

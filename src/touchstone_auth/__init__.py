@@ -122,7 +122,7 @@ class TouchstoneSession:
         """
         Attempts to load a Bearer token from the final successful redirect.
         """
-        match = re.search(r".*access_token=([^&]*)&id_token=[^&]*&token_type=Bearer", response.url)
+        match = re.search(r".*access_token=([^&]*)&id_token=[^&]*(?:&state=[^&]*)?&token_type=Bearer", response.url)
         if match is not None:
             self._session.headers.update({'authorization': 'Bearer {}'.format(match.group(1))})
             self.vlog('Bearer token loaded!')

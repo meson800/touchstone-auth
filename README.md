@@ -161,13 +161,9 @@ having to re-install after each update.
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.3.0] - 2022-01-15
+## [0.3.1] - 2022-02-23
 ### Added
-- Added the ability to use phone-call second factor.
-- Added additional constructor argument to select between
-  available second factor options.
-- Added typing-extensions to dependencies to properly support
-  Python 3.6 and Python 3.7
+- Added the ability to load a wider variety of Bearer tokens (Tim tickets)
 ```
 
 ## License

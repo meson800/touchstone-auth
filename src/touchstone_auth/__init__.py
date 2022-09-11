@@ -2,15 +2,18 @@
 Implements a helper class that is responsible for logging into a
 Touchstone-protected MIT SSO site. This enables programatic access
 to Touchstone services by a user. No authentication flow is blocked
-or bypassed; this simply allows programatic access to Duo 2FA
+or bypassed; this simply allows programmatic access to Duo 2FA
 and Touchstone auth outside of a web browser.
 """
+from dataclasses import dataclass
 import enum
+import functools
 import json
 import pathlib
 import pickle
 import re
-from typing import Union
+from typing import Optional, Union
+import warnings
 try:
     from typing import Literal
 except ImportError:
@@ -32,6 +35,38 @@ class TwofactorType(enum.Enum):
     DUO_PUSH = enum.auto()
     PHONE_CALL = enum.auto()
 
+@dataclass
+class CertificateAuth:
+    """
+    Use a password-protected certificate for initial authentication.
+    
+    The passed certificate file can either be a bytes object (for the actual cert)
+    or a string/path to a certificate file.
+    """
+    pkcs12_cert: Union[str,pathlib.Path,bytes]
+    pkcs12_pass: str
+
+@dataclass
+class UsernamePassAuth:
+    """
+    Use a username and password for initial authentication.
+
+    Do not hard code credentials in your script!
+    """
+    username: str
+    password: str
+
+def deprecate_nonurl_args(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if len(args) > 2:
+            warnings.warn(
+                'Passing arguments except for the base URL by position will be removed! Pass by keyword instead.',
+                DeprecationWarning
+            )
+        return f(*args, **kwargs)
+    return wrapper
+
 class TouchstoneSession:
     """
     This is a wrapper context manager class for requests.Session.
@@ -40,22 +75,25 @@ class TouchstoneSession:
  
     In addition, this session properly logs in using Touchstone and Duo if needed.
     """
+    @deprecate_nonurl_args
     def __init__(self,
         base_url:str,
-        pkcs12_filename:Union[str,pathlib.Path],
-        pkcs12_pass:str,
-        cookiejar_filename:Union[str,pathlib.Path],
+        pkcs12_filename:Optional[Union[str,pathlib.Path]]=None,
+        pkcs12_pass:Optional[str]=None,
+        cookiejar_filename:Union[str,pathlib.Path]='cookiejar.pickle',
         should_block:bool=True,
         twofactor_type:TwofactorType=TwofactorType.DUO_PUSH,
-        verbose:bool=False) -> None:
+        verbose:bool=False,
+        *,
+        auth_type:Optional[Union[CertificateAuth,UsernamePassAuth]]=None) -> None:
         """
         Creates a new Touchstone session.
 
         Arguments
         ---------
         base_url: a URL specifying the MIT SSO service to login to.
-        pkcs12_filename: A location of a password-protected client certificate (.p12)
-        pkcs12_pass: The password to the client certificate. Don't hard code this!
+        pkcs12_filename: (Deprecated) A location of a password-protected client certificate (.p12)
+        pkcs12_pass: (Deprecated)The password to the client certificate. Don't hard code this!
         cookiejar_filename: The location to persist cookies at.
         should_block: If False, if a Duo 2FA push is required, we instead raise a
             WouldBlockError. Does not error if cookies are recent enough to avoid 2FA.
@@ -63,12 +101,20 @@ class TouchstoneSession:
             Only Duo Push (TwofactorType.DUO_PUSH) and phone call (TwofactorType.PHONE_CALL)
             are currently supported.
         verbose: If True, extra information during log-in is printed to stdout
-        wipe_domains: If not None, wipes cookies for that domain before continuing.
+        auth_type: 
         """
 
         self._session: requests.Session = requests.Session()
         self._base_url = base_url
-        self._pkcs12 = {'filename': pkcs12_filename, 'password': pkcs12_pass}
+        if auth_type is not None:
+            # Check for invalid behavior
+            if pkcs12_filename is not None or pkcs12_pass is not None:
+                raise ValueError("Cannot pass both auth_type and the deprecated pkcs12_filename/pass at the same time!")
+            if type(auth_type) not in [CertificateAuth,UsernamePassAuth]:
+                raise TypeError("Invalid authentication type. Expecting a CertificateAuth or a UsernamePassAuth.")
+            self._auth = auth_type
+        else:
+            self._auth = CertificateAuth(pkcs12_filename, pkcs12_pass)
         self._cookiejar_filename = cookiejar_filename
         self._blocking = should_block
         self._twofactor_type = twofactor_type
@@ -135,13 +181,29 @@ class TouchstoneSession:
         ---------
         conversation: A string specifying the Touchstone conversation type.
         """
-        self._session.mount('https://idp.mit.edu', Pkcs12Adapter(
-            pkcs12_filename=self._pkcs12['filename'],
-            pkcs12_password=self._pkcs12['password']))
-        r = self._session.get('https://idp.mit.edu:446/idp/Authn/Certificate',params={
-            'login_certificate': 'Use Certificate - Go',
-            'conversation': conversation
-        })
+        if type(self._auth) == CertificateAuth:
+            if type(self._auth.pkcs12_cert) == bytes:
+                self._session.mount('https://idp.mit.edu', Pkcs12Adapter(
+                    pkcs12_data=self._auth.pkcs12_cert,
+                    pkcs12_password=self._auth.pkcs12_pass))
+            else:
+                self._session.mount('https://idp.mit.edu', Pkcs12Adapter(
+                    pkcs12_filename=self._auth.pkcs12_cert,
+                    pkcs12_password=self._auth.pkcs12_pass))
+            r = self._session.get('https://idp.mit.edu:446/idp/Authn/Certificate',params={
+                'login_certificate': 'Use Certificate - Go',
+                'conversation': conversation
+            })
+        elif type(self._auth) == UsernamePassAuth:
+            r = self._session.post('https://idp.mit.edu:446/idp/Authn/UsernamePassword',params={
+                'j_username': self._auth.username,
+                'j_password': self._auth.password,
+                'Submit': 'Login',
+                'conversation': conversation
+            })
+        else:
+            raise TypeError("Incorrect auth type passed!")
+            
 
         duo_html = BeautifulSoup(r.text, features='html.parser')
         duo_script = duo_html.find(id='duo_container').findChildren('script')[1].string
@@ -339,12 +401,20 @@ class TouchstoneSession:
         self.close()
         return False
 
+# For debugging
 if __name__ == '__main__':
     with open('credentials.json', encoding='utf-8') as configfile:
         config = json.load(configfile)
 
     with TouchstoneSession('https://atlas.mit.edu',
-            config['certfile'], config['password'], 'cookiejar.pickle',
-            twofactor_type=TwofactorType.PHONE_CALL,
+            # Username/pass auth
+            #auth_type=UsernamePassAuth(config['username'], config['password']), cookiejar_filename='cookiejar.pickle',
+            # Certificate auth
+            #auth_type=CertificateAuth(config['certfile'], config['password']), cookiejar_filename='cookiejar.pickle',
+            # Byte-loaded certificate auth
+            auth_type=CertificateAuth(open(config['certfile'], 'rb').read(), config['password']), cookiejar_filename='cookiejar.pickle',
+            # Deprecated certificate auth
+            #config['certfile'], config['password'], cookiejar_filename='cookiejar.pickle',
+            twofactor_type=TwofactorType.DUO_PUSH,
             verbose=True) as s:
         s.get('https://atlas.mit.edu')

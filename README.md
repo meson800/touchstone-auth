@@ -48,8 +48,7 @@ with open('credentials.json') as cred_file:
 
 with TouchstoneSession(
     base_url='https://atlas.mit.edu',
-    pkcs12_filename=credentials['certfile'],
-    pkcs12_pass=credentials['password'],
+    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
     cookiejar_filename='cookies.pickle') as s:
 
     response = s.get('https://atlas.mit.edu/atlas/Main.action')
@@ -66,6 +65,28 @@ in the `TouchstoneSession` constructor. If a blocking 2FA push is required, the 
 Finally, there is a `verbose` argument; setting `verbose=True` will output extra
 information about how processing is proceeding.
 
+## Alternate authentication
+You can use other authentication methods as well. 
+
+#### Certificate as a byte array
+If you have your certificate as a byte string instead of a filename, just pass the bytes as your certificate:
+```
+with TouchstoneSession(
+    base_url='...',
+    auth_type=CertificateAuth(cert_bytes, cert_password),
+    cookiejar_filename='cookies.pickle') as s:
+```
+
+#### Username/password
+To use your username and password (do *not* hard code your credentials in your code!), pass
+a `UsernamePassAuth` instead:
+```
+with TouchstoneSession(
+    base_url='...',
+    auth_type=CertificateAuth(cert_bytes, cert_password),
+    cookiejar_filename='cookies.pickle') as s:
+```
+
 ## Complete Examples
 
 ### Get your latest paystub from ADP:
@@ -78,8 +99,7 @@ with open('credentials.json') as cred_file:
 
 with TouchstoneSession(
     base_url='https://myadp.mit.edu',
-    pkcs12_filename=credentials['certfile'],
-    pkcs12_pass=credentials['password'],
+    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
     cookiejar_filename='cookies.pickle') as s:
 
     response = s.get('https://my.adp.com/myadp_prefix/v1_0/O/A/payStatements?adjustments=yes&numberoflastpaydates=160')
@@ -103,8 +123,7 @@ with open('credentials.json') as cred_file:
 
 with TouchstoneSession(
     base_url=r'https://atlas-auth.mit.edu/oauth2/authorize?identity_provider=Touchstone&redirect_uri=https://covidpass.mit.edu&response_type=TOKEN&client_id=2ao42ccnajj7jpqd7h059n7eoc&scope=covid19/impersonate covid19/user digital-id/search digital-id/user openid profile',
-    pkcs12_filename=credentials['certfile'],
-    pkcs12_pass=credentials['password'],
+    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
     cookiejar_filename='cookies.pickle') as s:
 
     response = json.loads(s.get('https://api.mit.edu/pass-v1/pass/access_status').text)
@@ -132,8 +151,7 @@ with open('credentials.json') as cred_file:
 
 with TouchstoneSession(
     base_url=r'https://atlas-auth.mit.edu/oauth2/authorize?identity_provider=Touchstone&redirect_uri=https://covidpass.mit.edu&response_type=TOKEN&client_id=2ao42ccnajj7jpqd7h059n7eoc&scope=covid19/impersonate covid19/user digital-id/search digital-id/user openid profile',
-    pkcs12_filename=credentials['certfile'],
-    pkcs12_pass=credentials['password'],
+    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
     cookiejar_filename='cookies.pickle',
     twofactor_type=TwofactorType.PHONE_CALL) as s:
 

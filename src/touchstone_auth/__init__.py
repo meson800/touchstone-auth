@@ -24,6 +24,7 @@ from bs4 import BeautifulSoup  # type: ignore
 import requests
 import requests.utils
 from requests_pkcs12 import Pkcs12Adapter  # type: ignore
+from requests_kerberos import HTTPKerberosAuth  # type: ignore
 
 class TouchstoneError(RuntimeError):
     """Represents all returnable Touchstone Errors"""
@@ -56,6 +57,12 @@ class UsernamePassAuth:
     username: str
     password: str
 
+@dataclass
+class KerberosAuth:
+    """
+    Use Kerberos tickets for initial authentication.
+    """
+
 def deprecate_nonurl_args(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -85,7 +92,7 @@ class TouchstoneSession:
         twofactor_type:TwofactorType=TwofactorType.DUO_PUSH,
         verbose:bool=False,
         *,
-        auth_type:Optional[Union[CertificateAuth,UsernamePassAuth]]=None) -> None:
+        auth_type:Optional[Union[CertificateAuth,UsernamePassAuth,KerberosAuth]]=None) -> None:
         """
         Creates a new Touchstone session.
 
@@ -110,8 +117,8 @@ class TouchstoneSession:
             # Check for invalid behavior
             if pkcs12_filename is not None or pkcs12_pass is not None:
                 raise ValueError("Cannot pass both auth_type and the deprecated pkcs12_filename/pass at the same time!")
-            if type(auth_type) not in [CertificateAuth,UsernamePassAuth]:
-                raise TypeError("Invalid authentication type. Expecting a CertificateAuth or a UsernamePassAuth.")
+            if type(auth_type) not in [CertificateAuth,UsernamePassAuth,KerberosAuth]:
+                raise TypeError("Invalid authentication type. Expecting a CertificateAuth, UsernamePassAuth, or KerberosAuth.")
             self._auth = auth_type
         else:
             self._auth = CertificateAuth(pkcs12_filename, pkcs12_pass)
@@ -201,9 +208,13 @@ class TouchstoneSession:
                 'Submit': 'Login',
                 'conversation': conversation
             })
+        elif type(self._auth) == KerberosAuth:
+            r = self._session.get('https://idp.mit.edu:446/idp/Authn/Kerberos',params={
+                'login_kerberos': 'Use existing tickets - Go',
+                'conversation': conversation
+            }, auth=HTTPKerberosAuth())
         else:
             raise TypeError("Incorrect auth type passed!")
-            
 
         duo_html = BeautifulSoup(r.text, features='html.parser')
         duo_script = duo_html.find(id='duo_container').findChildren('script')[1].string

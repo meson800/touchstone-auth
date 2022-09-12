@@ -217,7 +217,10 @@ class TouchstoneSession:
             raise TypeError("Incorrect auth type passed!")
 
         duo_html = BeautifulSoup(r.text, features='html.parser')
-        duo_script = duo_html.find(id='duo_container').findChildren('script')[1].string
+        duo_container = duo_html.find(id='duo_container')
+        if duo_container is None:
+            raise TouchstoneError("Initial authentication with {} failed".format(type(self._auth).__name__))
+        duo_script = duo_container.findChildren('script')[1].string
 
         # Clean up json string before decoding
         duo_connect_string = re.search(

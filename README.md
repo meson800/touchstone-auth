@@ -41,7 +41,7 @@ The example here loads credentials from a json file called `credentials.json`:
 Then, in your Python file, you can do the following:
 ```
 import json
-from touchstone_auth import TouchstoneSession
+from touchstone_auth import TouchstoneSession, CertificateAuth
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)
@@ -92,7 +92,7 @@ with TouchstoneSession(
 ### Get your latest paystub from ADP:
 ```
 import json
-from touchstone_auth import TouchstoneSession
+from touchstone_auth import TouchstoneSession, CertificateAuth
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)
@@ -116,7 +116,7 @@ which returns
 ### Check your Covidpass building access status:
 ```
 import json
-from touchstone_auth import TouchstoneSession
+from touchstone_auth import TouchstoneSession, CertificateAuth
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)
@@ -144,7 +144,7 @@ to use the phone-call two factor method in the above example, additionally impor
 the TwofactorType enum and pass it to the session constructor:
 ```
 import json
-from touchstone_auth import TouchstoneSession, TwofactorType
+from touchstone_auth import TouchstoneSession, CertificateAuth, TwofactorType
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)

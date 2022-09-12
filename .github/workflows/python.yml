@@ -30,7 +30,7 @@ jobs:
 #        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Install Linux dependencies
       run: |
-        apt-get install krb5
+        sudo apt-get install krb5
       if: runner.os == 'Linux'
     - name: Check binary-only install on non-Linux
       run: |

@@ -28,9 +28,14 @@ jobs:
         python -m pip install --upgrade pip
 #        pip install flake8 pytest
 #        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Check binary-only install
+    - name: Check binary-only install on non-Linux
       run: |
         python -m pip install --only-binary ":all" -e .
+      if: runner.os != 'Linux'
+    - name: Check install on Linux
+      run: |
+        python -m pip install -e .
+      if: runner.os == 'Linux'
 #    - name: Lint with flake8
 #      run: |
 #        # stop the build if there are Python syntax errors or undefined names

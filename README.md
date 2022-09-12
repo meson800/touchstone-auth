@@ -87,6 +87,16 @@ with TouchstoneSession(
     cookiejar_filename='cookies.pickle') as s:
 ```
 
+#### Kerberos tickets
+To authenticate using Kerberos tickets, pass `KerberosAuth()` as the `auth_type` parameter to
+`TouchstoneSession`, as in:
+```
+with TouchstoneSession(
+    base_url='...',
+    auth_type=KerberosAuth(),
+    cookiejar_filename='cookies.pickle') as s:
+```
+
 ## Complete Examples
 
 ### Get your latest paystub from ADP:
@@ -134,6 +144,20 @@ This returns `Current Covidpass status: access_granted` if you are in fact up to
 For the various "new Atlas" OAUTH2 applications, you need to find the relevant authorization URL to put as the base URL.
 
 How did I find the proper URL for Covidpass? By looking in your browser's Developer Tools, you can locate the last GET request prior to redirect to `idp.mit.edu`, then remove the extraneous `state` parameter.
+
+### Get the registration list for a class, using Kerberos authentication:
+```
+from touchstone_auth import TouchstoneSession, KerberosAuth
+from bs4 import BeautifulSoup
+
+with TouchstoneSession(base_url='https://student.mit.edu/',
+                       auth_type=KerberosAuth(),
+                       cookiejar_filename='cookies.pickle') as s:
+    payload = {'termcode': '2023FA', 'SUBJECT01': '6.1600'}
+    headers = {'Referer': 'https://student.mit.edu/cgi-bin/sfprwlst_sel.sh'}
+    r = s.post('https://student.mit.edu/cgi-bin/sfprwlst.sh', data=payload, headers=headers)
+    print(BeautifulSoup(r.text, 'html.parser').pre.text)
+```
 
 ### Selecting two-factor method
 With version 0.3.0, you can also select between phone-call and Duo Push two factor

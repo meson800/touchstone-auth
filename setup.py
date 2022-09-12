@@ -29,6 +29,7 @@ setuptools.setup(
         'beautifulsoup4',
         'requests',
         'requests-pkcs12==1.10',
+        'requests-kerberos',
         'typing-extensions'
     ]
 )

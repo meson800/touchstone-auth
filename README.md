@@ -203,9 +203,15 @@ having to re-install after each update.
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.3.1] - 2022-02-23
+## [0.4.0] - 2022-09-12
 ### Added
-- Added the ability to load a wider variety of Bearer tokens (Tim tickets)
+- Added the ability to do initial authentication with username/password
+  or with Kerberos tickets.
+### Deprecated
+- Passing the certfile/cert password as their own arguments is now deprecated.
+  Use the new `auth_type` argument to pass authentication information.
+### New contributors
+- Nickolai Zeldovich (zeldovich)
 ```
 
 ## License

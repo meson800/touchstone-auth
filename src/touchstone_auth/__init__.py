@@ -92,7 +92,8 @@ class TouchstoneSession:
         twofactor_type:TwofactorType=TwofactorType.DUO_PUSH,
         verbose:bool=False,
         *,
-        auth_type:Optional[Union[CertificateAuth,UsernamePassAuth,KerberosAuth]]=None) -> None:
+        auth_type:Optional[Union[CertificateAuth,UsernamePassAuth,KerberosAuth]]=None,
+        autosave_cookies:bool=True) -> None:
         """
         Creates a new Touchstone session.
 
@@ -108,7 +109,9 @@ class TouchstoneSession:
             Only Duo Push (TwofactorType.DUO_PUSH) and phone call (TwofactorType.PHONE_CALL)
             are currently supported.
         verbose: If True, extra information during log-in is printed to stdout
-        auth_type: 
+        auth_type: Determines the type of authentication to use. Pass an enum type.
+        autosave_cookies: If cookies should be automatically re-saved back to the same cookiejar file
+            when the session is closed.
         """
 
         self._session: requests.Session = requests.Session()
@@ -129,6 +132,7 @@ class TouchstoneSession:
         self._session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36'
         })
+        self._autosave_cookies = autosave_cookies
 
         # Load cookiejar from path (if it exists)
         try:
@@ -402,12 +406,19 @@ class TouchstoneSession:
     def __enter__(self) -> requests.Session:
         """Returns the internal session when called as a context manager"""
         return self._session
+    
+    def save_cookies(self, cookiejar: Union[str,pathlib.Path]) -> None:
+        """Saves session cookies into a cookiejar file, overwriting if present"""
+        # Save cookiejar
+        with open(cookiejar, 'wb') as cookies:
+            pickle.dump(self._session.cookies, cookies)
+
 
     def close(self) -> None:
         """Closes the session while saving the session cookies."""
-        # Save cookiejar
-        with open(self._cookiejar_filename, 'wb') as cookies:
-            pickle.dump(self._session.cookies, cookies)
+        # Save cookies if we are autosaving...
+        if self._autosave_cookies:
+            self.save_cookies(self._cookiejar_filename)
         # and close the internal session
         self._session.close()
 

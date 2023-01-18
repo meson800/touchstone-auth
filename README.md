@@ -203,15 +203,10 @@ having to re-install after each update.
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.4.0] - 2022-09-12
+## [0.5.0] - 2023-01-17
 ### Added
-- Added the ability to do initial authentication with username/password
-  or with Kerberos tickets.
-### Deprecated
-- Passing the certfile/cert password as their own arguments is now deprecated.
-  Use the new `auth_type` argument to pass authentication information.
-### New contributors
-- Nickolai Zeldovich (zeldovich)
+- Added the ability to control cookiejar saving. Autosave can be disabled
+  and the session cookies can now be saved at any time, not just on close.
 ```
 
 ## License

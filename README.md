@@ -203,10 +203,9 @@ having to re-install after each update.
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.5.0] - 2023-01-17
-### Added
-- Added the ability to control cookiejar saving. Autosave can be disabled
-  and the session cookies can now be saved at any time, not just on close.
+## [0.5.1] - 2023-02-04
+### Updated
+- Updated the version of requests-pkcs12 we rely on to avoid deprecation warnings.
 ```
 
 ## License

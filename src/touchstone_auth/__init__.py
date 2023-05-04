@@ -130,7 +130,7 @@ class TouchstoneSession:
         self._twofactor_type = twofactor_type
         self._verbose = verbose
         self._session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/112.0'
         })
         self._autosave_cookies = autosave_cookies
 
@@ -226,6 +226,9 @@ class TouchstoneSession:
             raise TouchstoneError("Initial authentication with {} failed".format(type(self._auth).__name__))
         duo_script = duo_container.findChildren('script')[1].string
 
+        # Get parent URL
+        parent_url =  r.url
+
         # Clean up json string before decoding
         duo_connect_string = re.search(
             r'Duo.init\(({[\S\s]*})\);',
@@ -238,31 +241,39 @@ class TouchstoneSession:
         # POST to Duo, which will 302 redirect, giving us the prompt SID
         duo_connect_params = {
             'tx': duo_tx,
-            'parent': f'https://idp.mit.edu:446/idp/Authn/Certificate?login_certificate=Use+Certificate+-+Go&conversation={conversation}',
+            'parent': parent_url,
             'v': '2.6'
         }
 
-        auth_request = self._session.post(f"https://{duo_json['host']}/frame/web/v1/auth",
-                params=duo_connect_params,
-                data={
+        duo_prompt_data = {
                     # Why do we have to provide tx and parent both in params and data? No idea...
                     'tx': duo_connect_params['tx'],
                     'parent': duo_connect_params['parent'],
                     'java_version': '',
                     'flash_version': '',
-                    'screen_resolution_width': '1920',
-                    'screen_resolution_height': '1080',
-                    'color_depth': '24',
+                    'screen_resolution_width': '2560',
+                    'screen_resolution_height': '1440',
+                    'color_depth': '32',
+                    'ch_ua_error': '',
+                    'client_hints': '',
                     'is_cef_browser': 'false',
                     'is_ipad_os': 'false',
                     'is_ie_compatibility_mode': '',
-                    'is_user_verifying_platform_authenticator_available': '',
-                    'user_verifying_platform_authenticator_available': '',
+                    'is_user_verifying_platform_authenticator_available': 'false',
                     'user_verifying_platform_authenticator_available_error': '',
                     'acting_ie_version': '',
                     'react_support': 'true',
                     'react_support_error_message': ''
-                })
+        }
+        # Get the URL first to set the xsrf cookie
+        _xsrf_get = self._session.get(f"https://{duo_json['host']}/frame/web/v1/auth",
+                params=duo_connect_params
+        )
+        # Post to get the redirect
+        auth_request = self._session.post(f"https://{duo_json['host']}/frame/web/v1/auth",
+                params=duo_connect_params,
+                data=duo_prompt_data
+        )
         if len(auth_request.history) > 0:
             # A redirect happened, do the full auth flow if we have time to block
             if not self._blocking:

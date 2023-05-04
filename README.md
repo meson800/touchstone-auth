@@ -203,9 +203,9 @@ having to re-install after each update.
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.5.1] - 2023-02-04
+## [0.5.2] - 2023-05-04
 ### Updated
-- Updated the version of requests-pkcs12 we rely on to avoid deprecation warnings.
+- Switched to using a Firefox user-agent, and added XSRF token GET call.
 ```
 
 ## License

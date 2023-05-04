@@ -192,6 +192,7 @@ class TouchstoneSession:
         ---------
         conversation: A string specifying the Touchstone conversation type.
         """
+        auth_kwargs = {}
         if type(self._auth) == CertificateAuth:
             if type(self._auth.pkcs12_cert) == bytes:
                 self._session.mount('https://idp.mit.edu', Pkcs12Adapter(
@@ -213,10 +214,11 @@ class TouchstoneSession:
                 'conversation': conversation
             })
         elif type(self._auth) == KerberosAuth:
+            auth_kwargs['auth'] = HTTPKerberosAuth()
             r = self._session.get('https://idp.mit.edu:446/idp/Authn/Kerberos',params={
                 'login_kerberos': 'Use existing tickets - Go',
                 'conversation': conversation
-            }, auth=HTTPKerberosAuth())
+            }, **auth_kwargs)
         else:
             raise TypeError("Incorrect auth type passed!")
 
@@ -385,7 +387,7 @@ class TouchstoneSession:
         return self._session.post(duo_auth_info['parent'],
             data={
                 'sig_response': f"{duo_auth_info['cookie']}:{duo_app}"
-            })
+            }, **auth_kwargs)
 
     def perform_sso(self, request) -> None:
         """

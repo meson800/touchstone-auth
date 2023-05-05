@@ -203,9 +203,9 @@ having to re-install after each update.
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.5.2] - 2023-05-04
+## [0.5.3] - 2023-05-04
 ### Updated
-- Switched to using a Firefox user-agent, and added XSRF token GET call.
+- Added explicit Kerberos post-auth request to accommodate Touchstone changes. 
 ```
 
 ## License

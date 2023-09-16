@@ -83,7 +83,7 @@ a `UsernamePassAuth` instead:
 ```
 with TouchstoneSession(
     base_url='...',
-    auth_type=CertificateAuth(cert_bytes, cert_password),
+    auth_type=UsernamePassAuth(kerb_account, kerb_password),
     cookiejar_filename='cookies.pickle') as s:
 ```
 
@@ -203,9 +203,10 @@ having to re-install after each update.
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.5.3] - 2023-05-04
+## [0.6.0] - 2023-09-15
 ### Updated
-- Added explicit Kerberos post-auth request to accommodate Touchstone changes. 
+- Duo updated to use a second POST instead of a redirect to load some params.
+  Library updated to be compatible with this new approach
 ```
 
 ## License

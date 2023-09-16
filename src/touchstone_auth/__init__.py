@@ -130,14 +130,15 @@ class TouchstoneSession:
         self._twofactor_type = twofactor_type
         self._verbose = verbose
         self._session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/112.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0'
         })
         self._autosave_cookies = autosave_cookies
 
         # Load cookiejar from path (if it exists)
         try:
             with open(cookiejar_filename, 'rb') as cookies:
-                self._session.cookies.update(pickle.load(cookies))
+                jar = pickle.load(cookies)
+                self._session.cookies.update(jar)
         except FileNotFoundError:
             pass
         
@@ -276,18 +277,51 @@ class TouchstoneSession:
                 params=duo_connect_params,
                 data=duo_prompt_data
         )
-        if len(auth_request.history) > 0:
-            # A redirect happened, do the full auth flow if we have time to block
+
+        auth_html = BeautifulSoup(auth_request.text, features='html.parser')
+
+        # POST to the healthcheck form to get the next cookie
+        healthcheck_form = auth_html.find('form', {'id': 'endpoint-health-form'})
+        if healthcheck_form is None:
+            raise TouchstoneError("Unable to locate healthcheck form needed for second auth post")
+        
+        sid = healthcheck_form.find('input', {'name': 'sid'})['value']
+        akey = healthcheck_form.find('input', {'name': 'akey'})['value']
+        txid = healthcheck_form.find('input', {'name': 'txid'})['value']
+        response_timeout = 15
+        duo_app_url = healthcheck_form.find('input', {'name': 'duo_app_url'})['value']
+        eh_service_url = healthcheck_form.find('input', {'name': 'eh_service_url'})['value']
+        eh_download_link = healthcheck_form.find('input', {'name': 'eh_download_link'})['value']
+        xsrf = healthcheck_form.find('input', {'name': '_xsrf'})['value']
+        is_silent_collection = 'true'
+        has_chromium_http_feature = 'true'
+        r = self._session.post(f"https://{duo_json['host']}/frame/web/v1/auth",
+                                params=duo_connect_params,
+                                data={
+                                    'sid': sid, 'akey': akey, 'txid': txid, 'response_timeout': response_timeout,
+                                    'duo_app_url': duo_app_url, 'eh_service_url': eh_service_url, 'eh_download_link': eh_download_link,
+                                    '_xsrf' : 'xsrf', 'is_silent_collection': is_silent_collection, 'has_chromium_http_feature': has_chromium_http_feature
+                                }, headers={'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
+        )
+
+        auth_html = BeautifulSoup(r.text, features='html.parser')
+        prompt_form = auth_html.find('form', {'action': '/frame/prompt'})
+
+        if prompt_form is not None:
             if not self._blocking:
                 raise WouldBlockError('Second factor auth required, but blocking is not allowed')
             self.vlog('Second factor auth required: requested Duo auth page')
 
-            prompt_url = auth_request.request.url
-            prompt_sid = re.match(r".*\/frame\/prompt\?sid=(.*)", prompt_url).group(1)
+            prompt_sid = prompt_form.find('input', {'name': 'sid'})['value']
+            xsrf = prompt_form.find('input', {'name': '_xsrf'})['value']
+
+            #prompt_url = auth_request.request.url
+            #prompt_sid = re.match(r".*\/frame\/prompt\?sid=(.*)", prompt_url).group(1)
             extra_prompt_headers = {
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'Referer': prompt_url,
+                'Referer': f"https://{duo_json['host']}/frame/prompt?sid={prompt_sid}",
                 'X-Requested-With': 'XMLHttpRequest',
+                'X-Xsrftoken': xsrf,
                 'Origin': f"https://{duo_json['host']}"
             }
 
@@ -300,7 +334,7 @@ class TouchstoneSession:
                     # Push data through as raw bytes; this is the correct URL encoding
                     # (don't let requests mess with it by sending as a dict)
                     data=bytes(
-                        f"sid={prompt_sid}&device=phone1&factor={factor}&cookies_allowed=true&dampen_choice=true&out_of_date=&days_out_of_date=&days_to_block=None",
+                        f"sid={requests.utils.quote(prompt_sid)}&device=phone1&factor={factor}&dampen_choice=true&out_of_date=&days_out_of_date=&days_to_block=None",
                         'utf-8'),
                     headers=extra_prompt_headers)
 
@@ -375,7 +409,6 @@ class TouchstoneSession:
             duo_auth_info = auth_result['response']
         else:
             self.vlog('Duo push not required: extracting auth token')
-            auth_html = BeautifulSoup(auth_request.text, features='html.parser')
             duo_auth_info = {
                 'parent': auth_html.find('input', {'id': 'js_parent'})['value'],
                 'cookie': auth_html.find('input', {'id': 'js_cookie'})['value']

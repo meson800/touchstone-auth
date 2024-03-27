@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2024-03-26
+### Updated
+- Library updated to be compatible with the new "universal" Duo prompt, which,
+  among other things, involves a new `/exit` endpoint to get back to Touchstone.
+
 ## [0.6.0] - 2023-09-15
 ### Updated
 - Duo updated to use a second POST instead of a redirect to load some params.

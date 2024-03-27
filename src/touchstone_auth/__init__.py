@@ -138,6 +138,14 @@ class TouchstoneSession:
         try:
             with open(cookiejar_filename, 'rb') as cookies:
                 jar = pickle.load(cookies)
+                # USEFUL FOR DEBUGGING: this lets you remove / keep cookies in the jar
+                #to_delete = []
+                #for cookie in jar:
+                #    if not cookie.domain.endswith('duosecurity.com'):
+                #        to_delete.append(cookie.name)
+                #for cookie in to_delete:
+                #    del jar[cookie]
+                #print(jar)
                 self._session.cookies.update(jar)
         except FileNotFoundError:
             pass
@@ -224,39 +232,44 @@ class TouchstoneSession:
             raise TypeError("Incorrect auth type passed!")
 
         duo_html = BeautifulSoup(r.text, features='html.parser')
-        duo_container = duo_html.find(id='duo_container')
-        if duo_container is None:
+        duo_form = duo_html.find(id='plugin_form')
+        if duo_form is None:
             raise TouchstoneError("Initial authentication with {} failed".format(type(self._auth).__name__))
-        duo_script = duo_container.findChildren('script')[1].string
+        
+        auth_url = r.url
+        url_matches = re.search(r"https:\/\/(?P<domain>[^/]+)(?P<path>[^?]+)\?sid=(?P<sid>[^&]+)\&tx=(?P<tx>.*)", auth_url)
+        if url_matches is None:
+            raise TouchstoneError("Can't extract sid and transaction from redirect URL")
+        duo_domain = url_matches.group('domain')
+        duo_path = url_matches.group('path')
+        duo_sid = url_matches.group('sid')
 
-        # Get parent URL
-        parent_url =  r.url
 
-        # Clean up json string before decoding
-        duo_connect_string = re.search(
-            r'Duo.init\(({[\S\s]*})\);',
-            duo_script).group(1).replace("'",'"')
-        duo_json = json.loads(duo_connect_string)
-        duo_tx, duo_app = duo_json['sig_request'].split(':')
+        duo_tx_field = duo_form.find('input', {'name': 'tx'})
+        duo_akey_field = duo_form.find('input', {'name': 'akey'})
+        duo_xsrf_field = duo_form.find('input', {'name': '_xsrf'})
+        if duo_tx_field is None or duo_akey_field is None or duo_xsrf_field is None:
+            raise TouchstoneError("Unable to locate required Duo fields in first /frame/frameless/v4/auth call")
+        duo_tx = duo_tx_field['value']
+        duo_akey = duo_akey_field['value']
+        duo_xsrf = duo_xsrf_field['value']
 
-        self.vlog('Decoded Touchstone Duo redirect request')
-
-        # POST to Duo, which will 302 redirect, giving us the prompt SID
-        duo_connect_params = {
-            'tx': duo_tx,
-            'parent': parent_url,
-            'v': '2.6'
-        }
-
+        self.vlog('Decoded Touchstone transaction/akey/xsrf from redirect')
+        
+        # Build the prompt data POST
         duo_prompt_data = {
                     # Why do we have to provide tx and parent both in params and data? No idea...
-                    'tx': duo_connect_params['tx'],
-                    'parent': duo_connect_params['parent'],
+                    'tx': duo_tx,
+                    'parent': 'None',
+                    '_xsrf': duo_xsrf,
+                    'version': 'v4',
+                    'akey': duo_akey,
+                    'has_session_trust_analysis_feature': 'False',
+                    'session_trust_extension_id': '',
                     'java_version': '',
-                    'flash_version': '',
-                    'screen_resolution_width': '2560',
-                    'screen_resolution_height': '1440',
-                    'color_depth': '32',
+                    'screen_resolution_width': '1920',
+                    'screen_resolution_height': '1080',
+                    'color_depth': '24',
                     'ch_ua_error': '',
                     'client_hints': '',
                     'is_cef_browser': 'false',
@@ -268,159 +281,152 @@ class TouchstoneSession:
                     'react_support': 'true',
                     'react_support_error_message': ''
         }
-        # Get the URL first to set the xsrf cookie
-        _xsrf_get = self._session.get(f"https://{duo_json['host']}/frame/web/v1/auth",
-                params=duo_connect_params
-        )
-        # Post to get the redirect
-        auth_request = self._session.post(f"https://{duo_json['host']}/frame/web/v1/auth",
-                params=duo_connect_params,
-                data=duo_prompt_data
-        )
 
-        auth_html = BeautifulSoup(auth_request.text, features='html.parser')
+        # Post to Duo to load required cookies and such
+        r = self._session.post(auth_url, data=duo_prompt_data)
+        # First one should be healthcheck
+        if '/frame/v4/preauth/healthcheck' not in r.url:
+            raise TouchstoneError("Didn't reach the Duo healthcheck endpoint!")
+        # GET the data endpoint
+        r = self._session.get(f'https://{duo_domain}/frame/v4/preauth/healthcheck/data?sid={duo_sid}')
+        # and GET the return endpoint
+        r = self._session.get(f'https://{duo_domain}/frame/v4/return?sid={duo_sid}')
 
-        # POST to the healthcheck form to get the next cookie
-        healthcheck_form = auth_html.find('form', {'id': 'endpoint-health-form'})
-        if healthcheck_form is None:
-            raise TouchstoneError("Unable to locate healthcheck form needed for second auth post")
+        # Post again
+        r = self._session.post(auth_url, data=duo_prompt_data)
+
+        if r.url.startswith('https://idp.mit.edu/idp/profile/SAML2/Redirect/SSO'):
+            # We're done!
+            self.vlog('Duo not required: Duo cookie cached. Returning to Touchstone')
+            return r
+
+        if '/frame/v4/auth/prompt' not in r.url:
+            raise TouchstoneError("Didn't reach the prompt Duo endpoint!")
         
-        sid = healthcheck_form.find('input', {'name': 'sid'})['value']
-        akey = healthcheck_form.find('input', {'name': 'akey'})['value']
-        txid = healthcheck_form.find('input', {'name': 'txid'})['value']
-        response_timeout = 15
-        duo_app_url = healthcheck_form.find('input', {'name': 'duo_app_url'})['value']
-        eh_service_url = healthcheck_form.find('input', {'name': 'eh_service_url'})['value']
-        eh_download_link = healthcheck_form.find('input', {'name': 'eh_download_link'})['value']
-        xsrf = healthcheck_form.find('input', {'name': '_xsrf'})['value']
-        is_silent_collection = 'true'
-        has_chromium_http_feature = 'true'
-        r = self._session.post(f"https://{duo_json['host']}/frame/web/v1/auth",
-                                params=duo_connect_params,
-                                data={
-                                    'sid': sid, 'akey': akey, 'txid': txid, 'response_timeout': response_timeout,
-                                    'duo_app_url': duo_app_url, 'eh_service_url': eh_service_url, 'eh_download_link': eh_download_link,
-                                    '_xsrf' : 'xsrf', 'is_silent_collection': is_silent_collection, 'has_chromium_http_feature': has_chromium_http_feature
-                                }, headers={'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
+        xsrf_search = re.search(r'\"xsrf_token\": \"([^\"]+)\"', r.text)
+        if xsrf_search is None:
+            raise TouchstoneError("Unable to extract XSRF token from prompt GET")
+        xsrf = xsrf_search.group(1)
+
+        if not self._blocking:
+            raise WouldBlockError('Second factor auth required, but blocking is not allowed')
+        self.vlog('Second factor auth required: requested Duo auth page')
+
+        extra_prompt_headers = {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Referer': f"https://{duo_domain}/frame/v4/auth/prompt?sid={duo_sid}",
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-Xsrftoken': xsrf,
+            'Origin': f"https://{duo_domain}"
+        }
+
+        # Get the device ID
+        r = self._session.get(f"https://{duo_domain}/frame/v4/auth/prompt/data",
+                # Push data through as raw bytes; this is the correct URL encoding
+                # (don't let requests mess with it by sending as a dict)
+                params=bytes(
+                    'post_auth_action=OIDC_EXIT&browser_features={"touch_supported"%3Afalse%2C"platform_authenticator_status"%3A"unavailable"%2C"webauthn_supported"%3Atrue}&sid=' + duo_sid,
+                    'utf-8'),
+                headers=extra_prompt_headers
+        )
+        prompt_data = json.loads(r.text)
+        if prompt_data['stat'] != 'OK':
+            raise TouchstoneError("Unable to fetch Duo prompt data")
+        device_id = prompt_data['response']['phones'][0]['key']
+
+        # POST to send the push
+        factor = {
+            TwofactorType.DUO_PUSH: 'Duo+Push',
+            TwofactorType.PHONE_CALL: 'Phone+Call'
+        }[self._twofactor_type]
+        r = self._session.post(f"https://{duo_domain}/frame/v4/prompt",
+                # Push data through as raw bytes; this is the correct URL encoding
+                # (don't let requests mess with it by sending as a dict)
+                data=bytes(
+                    f"device=phone1&factor={factor}&postAuthDestination=OIDC_EXIT&browser_features=%7B%22touch_supported%22%3Afalse%2C%22platform_authenticator_status%22%3A%22unavailable%22%2C%22webauthn_supported%22%3Atrue%7D&sid={duo_sid}",
+                    'utf-8'),
+                headers=extra_prompt_headers
         )
 
-        auth_html = BeautifulSoup(r.text, features='html.parser')
-        prompt_form = auth_html.find('form', {'action': '/frame/prompt'})
+        self.vlog(f'Requested second factor authentication ({factor})')
 
-        if prompt_form is not None:
-            if not self._blocking:
-                raise WouldBlockError('Second factor auth required, but blocking is not allowed')
-            self.vlog('Second factor auth required: requested Duo auth page')
+        prompt_response = json.loads(r.text)
+        if prompt_response['stat'] != 'OK':
+            raise TouchstoneError("Unable to send two-factor request")
 
-            prompt_sid = prompt_form.find('input', {'name': 'sid'})['value']
-            xsrf = prompt_form.find('input', {'name': '_xsrf'})['value']
+        # Do a first request (this returns the info 'Pushed a login request to your device')
+        r = self._session.post(f"https://{duo_domain}/frame/v4/status",
+            data=bytes(f"sid={duo_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+            headers=extra_prompt_headers)
+        expected_return_status = {
+            TwofactorType.DUO_PUSH: 'pushed',
+            TwofactorType.PHONE_CALL: 'calling'
+        }[self._twofactor_type]
+        if json.loads(r.text)['response']['status_code'] != expected_return_status:
+            raise TouchstoneError(f"Second-factor auth (self._twofactor_type) failed")
 
-            #prompt_url = auth_request.request.url
-            #prompt_sid = re.match(r".*\/frame\/prompt\?sid=(.*)", prompt_url).group(1)
-            extra_prompt_headers = {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'Referer': f"https://{duo_json['host']}/frame/prompt?sid={prompt_sid}",
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-Xsrftoken': xsrf,
-                'Origin': f"https://{duo_json['host']}"
-            }
-
-            # POST to send the push
-            factor = {
-                TwofactorType.DUO_PUSH: 'Duo+Push',
-                TwofactorType.PHONE_CALL: 'Phone+Call'
-            }[self._twofactor_type]
-            r = self._session.post(f"https://{duo_json['host']}/frame/prompt",
-                    # Push data through as raw bytes; this is the correct URL encoding
-                    # (don't let requests mess with it by sending as a dict)
-                    data=bytes(
-                        f"sid={requests.utils.quote(prompt_sid)}&device=phone1&factor={factor}&dampen_choice=true&out_of_date=&days_out_of_date=&days_to_block=None",
-                        'utf-8'),
-                    headers=extra_prompt_headers)
-
-            self.vlog(f'Requested second factor authentication ({factor})')
-
-            prompt_response = json.loads(r.text)
-            if prompt_response['stat'] != 'OK':
-                raise TouchstoneError("Unable to send two-factor request")
-
-            # Do a first request (this returns the info 'Pushed a login request to your device')
-            r = self._session.post(f"https://{duo_json['host']}/frame/status",
-                data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+        # Block until the user does something with the request
+        if self._twofactor_type == TwofactorType.DUO_PUSH:
+            self.vlog('Successfully pushed Duo push request. Blocking until response...')
+            r = self._session.post(f"https://{duo_domain}/frame/v4/status",
+                data=bytes(f"sid={duo_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
                 headers=extra_prompt_headers)
-            expected_return_status = {
-                TwofactorType.DUO_PUSH: 'pushed',
-                TwofactorType.PHONE_CALL: 'calling'
-            }[self._twofactor_type]
-            if json.loads(r.text)['response']['status_code'] != expected_return_status:
-                raise TouchstoneError(f"Second-factor auth (self._twofactor_type) failed")
+            post_prompt_response = json.loads(r.text)
+            self.vlog(post_prompt_response)
+            if post_prompt_response['stat'] != 'OK' or post_prompt_response['response']['status_code'] != 'allow':
+                raise TouchstoneError("User declined prompt or prompt timed out")
 
-
-            # Block until the user does something with the request
-            if self._twofactor_type == TwofactorType.DUO_PUSH:
-                self.vlog('Successfully pushed Duo push request. Blocking until response...')
-                r = self._session.post(f"https://{duo_json['host']}/frame/status",
-                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
-                    headers=extra_prompt_headers)
-                post_prompt_response = json.loads(r.text)
-                self.vlog(post_prompt_response)
-                if post_prompt_response['stat'] != 'OK':
-                    raise TouchstoneError("User declined prompt or prompt timed out")
-
-                self.vlog('Second factor auth successful!')
-            elif self._twofactor_type == TwofactorType.PHONE_CALL:
-                self.vlog('Successfully pushed phone call request...')
-                r = self._session.post(f"https://{duo_json['host']}/frame/status",
-                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
-                    headers=extra_prompt_headers)
-                post_request_response = json.loads(r.text)
-                if (post_request_response['stat'] != 'OK' or 
-                    post_request_response['response']['status_code'] != 'calling'):
-                    raise TouchstoneError("Unable to call registered phone number.")
-                self.vlog(post_request_response['response']['status'])
-                # After the dialing response, we expect the answered response.
-                r = self._session.post(f"https://{duo_json['host']}/frame/status",
-                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
-                    headers=extra_prompt_headers)
-                post_request_response = json.loads(r.text)
-                if (post_request_response['stat'] != 'OK' or 
-                    post_request_response['response']['status_code'] != 'answered'):
-                    raise TouchstoneError("Twofactor call declined.")
-                self.vlog("Two-factor call answered. Waiting for user input...")
-                # Check for successful response
-                r = self._session.post(f"https://{duo_json['host']}/frame/status",
-                    data=bytes(f"sid={prompt_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
-                    headers=extra_prompt_headers)
-                post_prompt_response = json.loads(r.text)
-                if (post_prompt_response['stat'] != 'OK' or 
-                    post_prompt_response['response']['status_code'] != 'allow'):
-                    raise TouchstoneError("Two-factor call failed.")
-                self.vlog('Second factor auth successful!')
-            else:
-                raise TouchstoneError('Unknown two-factor flow')
-
-            # Get the AUTH token
-            r = self._session.post(f"https://{duo_json['host']}{post_prompt_response['response']['result_url']}",
-                data=bytes(f"sid={prompt_sid}", 'utf-8'),
+            self.vlog('Second factor auth successful!')
+        elif self._twofactor_type == TwofactorType.PHONE_CALL:
+            self.vlog('Successfully pushed phone call request...')
+            r = self._session.post(f"https://{duo_domain}/frame/v4/status",
+                data=bytes(f"sid={duo_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
                 headers=extra_prompt_headers)
-            auth_result = json.loads(r.text)
-            if auth_result['stat'] != 'OK':
-                raise TouchstoneError("Unable to get Touchstone auth token")
-            duo_auth_info = auth_result['response']
+            post_request_response = json.loads(r.text)
+            if (post_request_response['stat'] != 'OK' or 
+                post_request_response['response']['status_code'] != 'calling'):
+                raise TouchstoneError("Unable to call registered phone number.")
+            # After the dialing response, we expect the answered response.
+            r = self._session.post(f"https://{duo_domain}/frame/v4/status",
+                data=bytes(f"sid={duo_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+                headers=extra_prompt_headers)
+            post_request_response = json.loads(r.text)
+            if (post_request_response['stat'] != 'OK' or 
+                post_request_response['response']['status_code'] != 'answered'):
+                raise TouchstoneError("Twofactor call declined.")
+            self.vlog("Two-factor call answered. Waiting for user input...")
+            # Check for successful response
+            r = self._session.post(f"https://{duo_domain}/frame/v4/status",
+                data=bytes(f"sid={duo_sid}&txid={prompt_response['response']['txid']}", 'utf-8'),
+                headers=extra_prompt_headers)
+            post_prompt_response = json.loads(r.text)
+            if (post_prompt_response['stat'] != 'OK' or 
+                post_prompt_response['response']['status_code'] != 'allow'):
+                raise TouchstoneError("Two-factor call failed.")
+            self.vlog('Second factor auth successful!')
         else:
-            self.vlog('Duo push not required: extracting auth token')
-            duo_auth_info = {
-                'parent': auth_html.find('input', {'id': 'js_parent'})['value'],
-                'cookie': auth_html.find('input', {'id': 'js_cookie'})['value']
-            }
+            raise TouchstoneError('Unknown two-factor flow')
+        
+        # Post to the log endpoint
+        r = self._session.post(f"https://{duo_domain}/frame/prompt/v4/log_analytic",
+                data={"action": "1", "page": "/frame/v4/auth/prompt", "target": "trust+browser:+yes", "browser_language": "en-US", "prompt_language": "en", "is_error": "false", "error_message": "undefined", "auth_method": factor, "auth_state": "AUTH_SUCCESS", "sid": duo_sid},
+                headers=extra_prompt_headers
+            )
 
+        extra_prompt_headers = {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Referer': f"https://{duo_domain}/frame/v4/auth/prompt?sid={duo_sid}",
+            'Origin': f"https://{duo_domain}",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+        }
 
-        self.vlog('Acquired Touchstone auth token')
-        # Post back to the parent, returning the request back to use for SSO login
-        return self._session.post(duo_auth_info['parent'],
-            data={
-                'sig_response': f"{duo_auth_info['cookie']}:{duo_app}"
-            }, **auth_kwargs)
+        self.vlog('Duo successful! Exiting back to Touchstone')
+
+        # Get the AUTH token
+        exit_data = f"sid={duo_sid}&txid={prompt_response['response']['txid']}&factor={factor}&device_key={device_id}&_xsrf={xsrf}&dampen_choice=true"
+        return self._session.post(f"https://{duo_domain}/frame/v4/oidc/exit",
+            data=bytes(exit_data, 'utf-8'),
+            headers=extra_prompt_headers)
 
     def perform_sso(self, request) -> None:
         """

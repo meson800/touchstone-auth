@@ -15,6 +15,9 @@ Enter `touchstone-auth`, a Python package powered mostly by the [requests](https
 package! This lets user authenticate themselves programmatically. Cookies are cached,
 meaning that re-authentication is only needed once cookies expire.
 
+### Okta updates
+MIT recently moved to using Okta for Touchstone flow. This deprecates certificate and Kerberos authentication!
+
 ## Install
 This package is on Pip, so you can just:
 ```
@@ -65,8 +68,9 @@ in the `TouchstoneSession` constructor. If a blocking 2FA push is required, the 
 Finally, there is a `verbose` argument; setting `verbose=True` will output extra
 information about how processing is proceeding.
 
-## Alternate authentication
-You can use other authentication methods as well. 
+## Alternate authentication (deprecated by Okta)
+You can use other authentication methods as well, but these will be removed
+because they are not supported by Okta!
 
 #### Certificate as a byte array
 If you have your certificate as a byte string instead of a filename, just pass the bytes as your certificate:
@@ -102,14 +106,14 @@ with TouchstoneSession(
 ### Get your latest paystub from ADP:
 ```
 import json
-from touchstone_auth import TouchstoneSession, CertificateAuth
+from touchstone_auth import TouchstoneSession, UsernamePassAuth
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)
 
 with TouchstoneSession(
     base_url='https://myadp.mit.edu',
-    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
+    auth_type=UsernamePassAuth(credentials['username'], credentials['password']),
     cookiejar_filename='cookies.pickle') as s:
 
     response = s.get('https://my.adp.com/myadp_prefix/v1_0/O/A/payStatements?adjustments=yes&numberoflastpaydates=160')
@@ -126,14 +130,14 @@ which returns
 ### Check your Covidpass building access status:
 ```
 import json
-from touchstone_auth import TouchstoneSession, CertificateAuth
+from touchstone_auth import TouchstoneSession, UsernamePassAuth
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)
 
 with TouchstoneSession(
     base_url=r'https://atlas-auth.mit.edu/oauth2/authorize?identity_provider=Touchstone&redirect_uri=https://covidpass.mit.edu&response_type=TOKEN&client_id=2ao42ccnajj7jpqd7h059n7eoc&scope=covid19/impersonate covid19/user digital-id/search digital-id/user openid profile',
-    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
+    auth_type=UsernamePassAuth(credentials['username'], credentials['password']),
     cookiejar_filename='cookies.pickle') as s:
 
     response = json.loads(s.get('https://api.mit.edu/pass-v1/pass/access_status').text)
@@ -147,11 +151,14 @@ How did I find the proper URL for Covidpass? By looking in your browser's Develo
 
 ### Get the registration list for a class, using Kerberos authentication:
 ```
-from touchstone_auth import TouchstoneSession, KerberosAuth
+from touchstone_auth import TouchstoneSession, UsernamePassAuth
 from bs4 import BeautifulSoup
 
+with open('credentials.json') as cred_file:
+    credentials = json.load(cred_file)
+
 with TouchstoneSession(base_url='https://student.mit.edu/',
-                       auth_type=KerberosAuth(),
+                       auth_type=UsernamePassAuth(config['username'], config['password']),
                        cookiejar_filename='cookies.pickle') as s:
     payload = {'termcode': '2023FA', 'SUBJECT01': '6.1600'}
     headers = {'Referer': 'https://student.mit.edu/cgi-bin/sfprwlst_sel.sh'}
@@ -168,21 +175,20 @@ to use the phone-call two factor method in the above example, additionally impor
 the TwofactorType enum and pass it to the session constructor:
 ```
 import json
-from touchstone_auth import TouchstoneSession, CertificateAuth, TwofactorType
+from touchstone_auth import TouchstoneSession, UsernamePassAuth, TwofactorType
 
 with open('credentials.json') as cred_file:
     credentials = json.load(cred_file)
 
 with TouchstoneSession(
     base_url=r'https://atlas-auth.mit.edu/oauth2/authorize?identity_provider=Touchstone&redirect_uri=https://covidpass.mit.edu&response_type=TOKEN&client_id=2ao42ccnajj7jpqd7h059n7eoc&scope=covid19/impersonate covid19/user digital-id/search digital-id/user openid profile',
-    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
+    auth_type=UsernamePassAuth(credentials['username'], credentials['password']),
     cookiejar_filename='cookies.pickle',
     twofactor_type=TwofactorType.PHONE_CALL) as s:
 
     response = json.loads(s.get('https://api.mit.edu/pass-v1/pass/access_status').text)
     print('Current Covidpass status: {}'.format(response['status']))
 ```
-
 
 ## Developer install
 If you'd like to hack locally on `touchstone-auth`, after cloning this repository:
@@ -200,13 +206,29 @@ $ pip install -e .
 After this 'local install', you can use and import `touchstone-auth` freely without
 having to re-install after each update.
 
+## Debugging
+You can run this package as a module to generate debug output. By default:
+```
+python -m touchstone_auth
+```
+attempts to login to https://atlas.mit.edu using the credentials in `credentials.json` and prints out the title of the resulting HTML.
+
+You can change the target and the credential file with the `--url` and `--credentials` arguments.
+
+This is useful for a sanity check, as it returns the verbose debug information.
+
+## Known problems
+- New MIT applications may not use Shibboleth going forward. This library does not
+  currently support non-Shibboleth applications, but this is an intended feature for 0.9.0
+
 ## Changelog
 See the [CHANGELOG](CHANGELOG.md) for detailed changes.
 ```
-## [0.7.0] - 2024-03-26
+## [0.8.0] - 2024-06-23
 ### Updated
-- Library updated to be compatible with the new "universal" Duo prompt, which,
-  among other things, involves a new `/exit` endpoint to get back to Touchstone.
+- Now works with the new Okta Touchstone flow, for applications that use the Shibboleth proxy.
+### Added
+- The library can now be run as a module (python -m touchstone_auth) for debugging purposes.
 ```
 
 ## License

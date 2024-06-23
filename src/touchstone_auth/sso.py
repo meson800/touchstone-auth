@@ -26,7 +26,7 @@ import requests.utils
 from requests_pkcs12 import Pkcs12Adapter  # type: ignore
 from requests_kerberos import HTTPKerberosAuth  # type: ignore
 
-from .okta_parsing import select_remediation
+from .okta_parsing import select_remediation, extract_state_token
 
 class TouchstoneError(RuntimeError):
     """Represents all returnable Touchstone Errors"""
@@ -189,7 +189,7 @@ class TouchstoneSession:
             if (initial_response.url.startswith(r'https://idp.mit.edu/idp/profile/SAML2/Redirect/SSO') or
                 initial_response.url.startswith(r'https://idp.mit.edu/idp/profile/SAML2/Unsolicited/SSO')):
                 self.vlog('Touchstone cookies still up to date; performing SSO redirect.')
-                self.perform_old_sso(initial_response)
+                self.perform_final_idp_redirect(initial_response)
             else:
                 self.vlog('We are not in the Touchstone auth or SSO flow! Terminal URL: {}'.format(
                     initial_response.url))
@@ -198,7 +198,7 @@ class TouchstoneSession:
             self.vlog('Performing certificate/Duo login...')
             touchstone_response = self.perform_old_touchstone(match.group(1))
             self.vlog('Performing SSO login post-Duo')
-            self.perform_old_sso(touchstone_response)
+            self.perform_final_idp_redirect(touchstone_response)
 
     def load_bearer_token(self, response: requests.Response) -> bool:
         """
@@ -223,16 +223,7 @@ class TouchstoneSession:
             raise TouchstoneError("You must use username/password auth with the new Okta touchstone. See https://ist.mit.edu/news/touchstone-okta")
         
         # Extract the OktaData from the proxy request
-        match = re.search(r"oktaData = (?P<oktaData>{.*};)", touchstone_proxy_response)
-        if match is None:
-            raise TouchstoneError("Okta: Unable to extract Okta data from the Touchstone proxy page")
-        # The resulting thing is not...quite JSON. Just use regexes to extract. There are embedded
-        # Javascript functions and other things that break JSON parsing :( 
-        unescaped = match.group(1).encode('utf-8').decode('unicode_escape')
-        match = re.search(r"\"idpDiscovery\":.*\"stateToken\":\"(?P<stateToken>[^\"]+)\"", unescaped)
-        if match is None:
-            raise TouchstoneError("Okta: Unable to extract the initial Okta state token!")
-        state_token = match.group(1)
+        state_token = extract_state_token(touchstone_proxy_response)
 
         r = self._session.post("https://okta.mit.edu/idp/idx/introspect", data=json.dumps({"stateToken": state_token}), headers={"Content-Type": "application/ion+json; okta-version=1.0.0"})
         
@@ -264,14 +255,35 @@ class TouchstoneSession:
             if remediation.http_method == "GET":
                 r = self._session.get(remediation.url, params=remediation.data)
         
-        self.perform_duo(r)
-        
-        # 1: pull ou the code out of the main.js
-        # 2: generate the code verifier and code verifier/nonce/whatever, and hit /authroize
-        # 3: POST to introspect
-        # 4: Follow the remediations around
-                        
+        r = self.perform_duo(r)
 
+        state_token = extract_state_token(r.text)
+        # Call back to the introspect endpoint to get the redirect 
+        r = self._session.post("https://okta.mit.edu/idp/idx/introspect", data=json.dumps({"stateToken": state_token}), headers={"Content-Type": "application/ion+json; okta-version=1.0.0"})
+        if r.status_code != 200:
+            raise TouchstoneError("Failed to extract Okta redirect URL!")
+        redirect_data = r.json()
+        if 'success' not in redirect_data or 'name' not in redirect_data['success'] or redirect_data['success']['name'] != 'success-redirect' or 'href' not in redirect_data['success']:
+            raise TouchstoneError("Failed to extract Okta redirect URL!")
+        
+        self.vlog("Okta (shib-proxy): Obtaining SAML response...")
+        r = self._session.get(redirect_data['success']['href'])
+
+        okta_shibboleth_proxy_html = BeautifulSoup(r.text, features='html.parser')
+        proxy_form = okta_shibboleth_proxy_html.find('form', {"id": "appForm"})
+        if proxy_form is None:
+            raise TouchstoneError("Unable to extract the Shibboleth proxy form!")
+        
+        r = self._session.post(proxy_form.attrs['action'], data={
+            'SAMLResponse': proxy_form.find('input', {'name': 'SAMLResponse'})['value'],
+            'RelayState': proxy_form.find('input', {'name': 'RelayState'})['value'],
+        })
+
+        self.vlog("Okta (shib-proxy): redirected to Shibboleth successfully")
+
+        if r.status_code != 200:
+            raise TouchstoneError("Failed to redirect to Shibboleth")
+        self.perform_final_idp_redirect(r)
 
     def perform_old_touchstone(self, conversation):
         """
@@ -518,7 +530,7 @@ class TouchstoneSession:
             data=bytes(exit_data, 'utf-8'),
             headers=extra_prompt_headers)
 
-    def perform_old_sso(self, request) -> None:
+    def perform_final_idp_redirect(self, request) -> None:
         """
         Given a Request object, attempts to perform Touchstone SSO redirect by
         extracting form fields and POSTing to the right location.
@@ -526,7 +538,7 @@ class TouchstoneSession:
         touchstone_html = BeautifulSoup(request.text, features='html.parser')
         touchstone_form = touchstone_html.find('form')
 
-        self.vlog('Posting SSO redirect')
+        self.vlog('Shib: Posting SSO redirect')
 
         r = self._session.post(touchstone_form.attrs['action'], data={
             'RelayState': touchstone_form.find('input', {'name': 'RelayState'})['value'],
@@ -535,7 +547,7 @@ class TouchstoneSession:
         if r.url.startswith('https://idp.mit.edu'):
             raise TouchstoneError('SSO redirect unsuccessful')
 
-        self.vlog('SSO redirect successful!')
+        self.vlog('Shib: SSO redirect successful!')
         self.load_bearer_token(r)
 
     def vlog(self, string: str) -> None:

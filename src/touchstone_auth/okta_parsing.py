@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict
+import re
+
 import touchstone_auth.sso
 
 @dataclass
@@ -41,3 +43,24 @@ def select_remediation(remediations, available_data) -> Remediation:
         return Remediation(name=name, url=url, http_method=method, data=remediation_data)
     raise touchstone_auth.sso.TouchstoneError("Unable to locate a Okta remediation!")
 
+
+def extract_state_token(request_text):
+    """
+    Extracts the stateToken from within the oktaState object.
+    
+    Raises TouchstoneErrors if unable to do so.
+    
+    Arguments
+    ---------
+    request_text: the text of the Okta response to parse.
+    """
+    match = re.search(r"oktaData = (?P<oktaData>{.*};)", request_text)
+    if match is None:
+        raise touchstone_auth.sso.TouchstoneError("Okta: Unable to extract Okta data from the Touchstone proxy page")
+    # The resulting thing is not...quite JSON. Just use regexes to extract. There are embedded
+    # Javascript functions and other things that break JSON parsing :( 
+    unescaped = match.group(1).encode('utf-8').decode('unicode_escape')
+    match = re.search(r"\"idpDiscovery\":.*\"stateToken\":\"(?P<stateToken>[^\"]+)\"", unescaped)
+    if match is None:
+        raise touchstone_auth.sso.TouchstoneError("Okta: Unable to extract the Okta state token!")
+    return match.group(1)

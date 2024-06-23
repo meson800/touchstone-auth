@@ -1,4 +1,5 @@
 from touchstone_auth import TouchstoneSession, UsernamePassAuth, TwofactorType
+from bs4 import BeautifulSoup  # type: ignore
 import json
 
 if __name__ == '__main__':
@@ -19,4 +20,6 @@ if __name__ == '__main__':
             #config['certfile'], config['password'], cookiejar_filename='cookiejar.pickle',
             twofactor_type=TwofactorType.DUO_PUSH,
             verbose=True) as s:
-        s.get('https://atlas.mit.edu')
+        r = s.get('https://atlas.mit.edu')
+        parsed_html = BeautifulSoup(r.text, features='html.parser')
+        print(parsed_html.find('title').string)

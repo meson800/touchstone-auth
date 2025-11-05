@@ -29,7 +29,7 @@ N.B. if installing manually, `requests_pkcs12` must be version v1.10 (`pip insta
 The class `TouchstoneSession` is simply a `requests.Session` that performs the Touchstone
 authentication flow before returning a working session to you, the authenticated user.
 
-It is easiest to use as a context manager. Because Touchstone authentication requires a client-side certificate, remember to **not hard-code** your credentials!
+It is easiest to use as a context manager. Because Touchstone authentication is logging in as yourself, remember to **not hard-code** your credentials and certainly don't commit them to git!
 The example here loads credentials from a json file called `credentials.json`:
 ```
 {
@@ -76,6 +76,10 @@ with TouchstoneSession(
     auth_type=UsernamePassAuth(kerb_account, kerb_password),
     cookiejar_filename='cookies.pickle') as s:
 ```
+
+#### Deprecated methods
+Certain old MIT websites do still use the bespoke MIT system. If you are accessing one of these systems that has not been upgraded to use Okta yet,
+you can use one of these auth methods. There's no guarantee that this will remain stable, but we retain the auth methods here.
 
 #### Certificate as a byte array (deprecated by Okta)
 If you have your certificate as a byte string instead of a filename, just pass the bytes as your certificate:

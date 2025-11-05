@@ -6,17 +6,14 @@
 
 ## Rationale
 MIT itself and MIT-adjacent organizations offer many useful web services through
-a Single-Sign-On (SSO) service called Touchstone, with two-factor logins provided
-by Duo. This is great, and allows easy access to many functionalities, but because
-MIT does not use a commercial SSO provider (like Okta and others), there is limited
+a Single-Sign-On (SSO) service called Touchstone, powered by Okta with two-factor logins
+provided by Duo. This is great, and allows easy access to many functionalities, but because
+MIT retrofit Okta into its existing bespoke infrastructure, there is limited
 ability to access Touchstone-protected sites without a web browser.
 
 Enter `touchstone-auth`, a Python package powered mostly by the [requests](https://docs.python-requests.org/en/master/index.html)
 package! This lets user authenticate themselves programmatically. Cookies are cached,
 meaning that re-authentication is only needed once cookies expire.
-
-### Okta updates
-MIT recently moved to using Okta for Touchstone flow. This deprecates certificate and Kerberos authentication!
 
 ## Install
 This package is on Pip, so you can just:
@@ -36,8 +33,8 @@ It is easiest to use as a context manager. Because Touchstone authentication req
 The example here loads credentials from a json file called `credentials.json`:
 ```
 {
-    "certfile": "some_client_credential.p12",
-    "password": "horse-battery-staple-correct"
+    "username": "<kerb>",
+    "password": "<password>"
 }
 ```
 
@@ -46,14 +43,14 @@ Then, in your Python file, you can do the following:
 import json
 from touchstone_auth import TouchstoneSession, CertificateAuth
 
-with open('credentials.json') as cred_file:
-    credentials = json.load(cred_file)
+with open('credentials.json') as config_file:
+    config = json.load(config_file)
 
 with TouchstoneSession(
-    base_url='https://atlas.mit.edu',
-    auth_type=CertificateAuth(credentials['certfile'], credentials['password']),
-    cookiejar_filename='cookies.pickle') as s:
-
+        base_url='https://atlas.mit.edu',
+        auth_type=UsernamePassAuth(config['username'], config['password']),
+        cookiejar_filename='cookies.pickle',
+        verbose=True) as s:
     response = s.get('https://atlas.mit.edu/atlas/Main.action')
 ```
 
@@ -68,18 +65,7 @@ in the `TouchstoneSession` constructor. If a blocking 2FA push is required, the 
 Finally, there is a `verbose` argument; setting `verbose=True` will output extra
 information about how processing is proceeding.
 
-## Alternate authentication (deprecated by Okta)
-You can use other authentication methods as well, but these will be removed
-because they are not supported by Okta!
-
-#### Certificate as a byte array
-If you have your certificate as a byte string instead of a filename, just pass the bytes as your certificate:
-```
-with TouchstoneSession(
-    base_url='...',
-    auth_type=CertificateAuth(cert_bytes, cert_password),
-    cookiejar_filename='cookies.pickle') as s:
-```
+## Authentication methods
 
 #### Username/password
 To use your username and password (do *not* hard code your credentials in your code!), pass
@@ -91,7 +77,16 @@ with TouchstoneSession(
     cookiejar_filename='cookies.pickle') as s:
 ```
 
-#### Kerberos tickets
+#### Certificate as a byte array (deprecated by Okta)
+If you have your certificate as a byte string instead of a filename, just pass the bytes as your certificate:
+```
+with TouchstoneSession(
+    base_url='...',
+    auth_type=CertificateAuth(cert_bytes, cert_password),
+    cookiejar_filename='cookies.pickle') as s:
+```
+
+#### Kerberos tickets (deprecated by Okta)
 To authenticate using Kerberos tickets, pass `KerberosAuth()` as the `auth_type` parameter to
 `TouchstoneSession`, as in:
 ```
